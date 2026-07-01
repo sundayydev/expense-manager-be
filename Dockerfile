@@ -59,4 +59,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget -qO- http://localhost:3000/api/v1/health || exit 1
 
 # Chạy migrations rồi start app
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss && node dist/main"]
