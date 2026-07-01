@@ -1,0 +1,688 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "library"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+/// Loại giao dịch: thu nhập hoặc chi tiêu
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+/// Trạng thái giao dịch
+enum TransactionStatus {
+  PENDING    // Chờ xử lý
+  COMPLETED  // Hoàn thành
+  CANCELLED  // Đã hủy
+  FAILED     // Thất bại
+}
+
+/// Loại tài khoản tài chính
+enum AccountType {
+  CASH          // Tiền mặt
+  BANK_ACCOUNT  // Tài khoản ngân hàng
+  CREDIT_CARD   // Thẻ tín dụng
+  E_WALLET      // Ví điện tử (Momo, ZaloPay...)
+  INVESTMENT    // Đầu tư (cổ phiếu, crypto...)
+  SAVINGS       // Tài khoản tiết kiệm
+  LOAN          // Khoản vay
+  OTHER         // Khác
+}
+
+/// Tần suất lặp lại của giao dịch định kỳ
+enum RecurrenceFrequency {
+  DAILY    // Hàng ngày
+  WEEKLY   // Hàng tuần
+  MONTHLY  // Hàng tháng
+  YEARLY   // Hàng năm
+}
+
+/// Loại ngân sách
+enum BudgetType {
+  MONTHLY // Ngân sách hàng tháng
+  YEARLY  // Ngân sách hàng năm
+  CUSTOM  // Tùy chỉnh khoảng thời gian
+}
+
+/// Trạng thái mục tiêu tiết kiệm
+enum GoalStatus {
+  IN_PROGRESS // Đang thực hiện
+  COMPLETED   // Đã hoàn thành
+  PAUSED      // Tạm dừng
+  CANCELLED   // Đã hủy
+}
+
+/// Loại nợ/khoản vay
+enum DebtType {
+  BORROWED  // Tôi đi vay (tôi nợ người khác)
+  LENT      // Tôi cho vay (người khác nợ tôi)
+}
+
+/// Trạng thái nợ
+enum DebtStatus {
+  ACTIVE    // Còn nợ
+  PAID      // Đã trả xong
+  OVERDUE   // Quá hạn
+  PARTIAL   // Đã trả một phần
+}
+
+/// Mức độ ưu tiên thông báo
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+/// Loại thông báo
+enum NotificationType {
+  BUDGET_ALERT        // Cảnh báo vượt ngân sách
+  BILL_REMINDER       // Nhắc nhở hóa đơn
+  GOAL_ACHIEVED       // Đạt mục tiêu tiết kiệm
+  DEBT_DUE            // Nhắc nhở đến hạn nợ
+  RECURRING_CREATED   // Giao dịch định kỳ đã tạo
+  GENERAL             // Thông báo chung
+}
+
+/// Loại báo cáo
+enum ReportType {
+  MONTHLY_SUMMARY    // Tổng kết tháng
+  YEARLY_SUMMARY     // Tổng kết năm
+  CATEGORY_BREAKDOWN // Phân tích theo danh mục
+  CUSTOM             // Tùy chỉnh
+}
+
+// ============================================================
+// BẢNG NGƯỜI DÙNG
+// ============================================================
+
+/// Bảng người dùng - lưu thông tin tài khoản
+model User {
+  id                Int    @id @default(autoincrement())
+  email             String    @unique
+  username          String    @unique
+  passwordHash      String
+  fullName          String
+  avatarUrl         String?
+  phoneNumber       String?   @unique
+  dateOfBirth       DateTime?
+  isEmailVerified   Boolean   @default(false)
+  isActive          Boolean   @default(true)
+  lastLoginAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relations
+  profile               UserProfile?
+  accounts              Account[]
+  categories            Category[]
+  transactions          Transaction[]
+  budgets               Budget[]
+  savingGoals           SavingGoal[]
+  debts                 Debt[]
+  recurringPlans        RecurringTransaction[]
+  notifications         Notification[]
+  reports               Report[]
+  tags                  Tag[]
+  attachments           Attachment[]
+  auditLogs             AuditLog[]
+  sessions              UserSession[]
+  currencySettings      UserCurrencySetting[]
+
+  @@map("users")
+}
+
+/// Thông tin hồ sơ mở rộng của người dùng
+model UserProfile {
+  id                  Int    @id @default(autoincrement())
+  userId              Int       @unique
+  bio                 String?
+  occupation          String?
+  defaultCurrencyCode String    @default("VND")
+  language            String    @default("vi")
+  timezone            String    @default("Asia/Ho_Chi_Minh")
+  startDayOfMonth     Int       @default(1)  // Ngày bắt đầu tháng tài chính (1-28)
+  monthlyIncomeTarget Decimal?  @db.Decimal(15, 2) // Mục tiêu thu nhập hàng tháng
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  // Relations
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}
+
+/// Phiên đăng nhập của người dùng
+model UserSession {
+  id           Int   @id @default(autoincrement())
+  userId       Int
+  refreshToken String   @unique
+  deviceInfo   String?  // Thông tin thiết bị
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  // Relations
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+// ============================================================
+// BẢNG TIỀN TỆ
+// ============================================================
+
+/// Danh sách các loại tiền tệ được hỗ trợ
+model Currency {
+  code        String   @id // VND, USD, EUR...
+  name        String   // Vietnamese Dong
+  symbol      String   // d, $, euro
+  decimalUnit Int      @default(0) // Số chữ số thập phân
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  // Relations
+  accounts          Account[]
+  exchangeRatesFrom ExchangeRate[]        @relation("FromCurrency")
+  exchangeRatesTo   ExchangeRate[]        @relation("ToCurrency")
+  userSettings      UserCurrencySetting[]
+
+  @@map("currencies")
+}
+
+/// Tỷ giá hối đoái giữa các loại tiền tệ
+model ExchangeRate {
+  id               Int   @id @default(autoincrement())
+  fromCurrencyCode String
+  toCurrencyCode   String
+  rate             Decimal  @db.Decimal(20, 8) // Tỷ giá quy đổi
+  recordedAt       DateTime @default(now()) // Thời điểm ghi nhận tỷ giá
+
+  // Relations
+  fromCurrency     Currency @relation("FromCurrency", fields: [fromCurrencyCode], references: [code])
+  toCurrency       Currency @relation("ToCurrency", fields: [toCurrencyCode], references: [code])
+
+  @@unique([fromCurrencyCode, toCurrencyCode, recordedAt])
+  @@index([fromCurrencyCode, toCurrencyCode])
+  @@map("exchange_rates")
+}
+
+/// Cài đặt tiền tệ của người dùng
+model UserCurrencySetting {
+  id           Int   @id @default(autoincrement())
+  userId       Int
+  currencyCode String
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  // Relations
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currency     Currency @relation(fields: [currencyCode], references: [code])
+
+  @@unique([userId, currencyCode])
+  @@map("user_currency_settings")
+}
+
+// ============================================================
+// BẢNG TÀI KHOẢN TÀI CHÍNH
+// ============================================================
+
+/// Tài khoản tài chính (ví, tài khoản ngân hàng, thẻ tín dụng...)
+model Account {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  name           String      // Tên tài khoản (VD: "Ví tiền mặt", "Techcombank")
+  type           AccountType
+  currencyCode   String      @default("VND")
+  initialBalance Decimal     @default(0) @db.Decimal(15, 2) // Số dư ban đầu
+  currentBalance Decimal     @default(0) @db.Decimal(15, 2) // Số dư hiện tại
+  creditLimit    Decimal?    @db.Decimal(15, 2) // Hạn mức tín dụng (dành cho thẻ tín dụng)
+  bankName       String?     // Tên ngân hàng
+  bankBranch     String?     // Chi nhánh ngân hàng
+  accountNumber  String?     // Số tài khoản / số thẻ (lưu ẩn)
+  color          String?     // Màu hiển thị (hex color)
+  icon           String?     // Icon đại diện
+  description    String?
+  isDefault      Boolean     @default(false) // Tài khoản mặc định
+  isArchived     Boolean     @default(false) // Đã lưu trữ
+  includeInTotal Boolean     @default(true)  // Tính vào tổng tài sản
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  // Relations
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currency              Currency               @relation(fields: [currencyCode], references: [code])
+  transactionsFrom      Transaction[]          @relation("FromAccount")
+  transactionsTo        Transaction[]          @relation("ToAccount")
+  savingGoals           SavingGoal[]
+  debts                 Debt[]
+  recurringTransactions RecurringTransaction[]
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+// ============================================================
+// BẢNG DANH MỤC
+// ============================================================
+
+/// Danh mục thu chi (hỗ trợ cây phân cấp)
+model Category {
+  id          Int          @id @default(autoincrement())
+  userId Int?         // Null = danh mục mặc định của hệ thống
+  parentId    Int?         // Danh mục cha (hỗ trợ danh mục con)
+  name        String
+  type        TransactionType // INCOME hoặc EXPENSE
+  color       String?         // Màu hiển thị (hex)
+  icon        String?         // Icon emoji hoặc tên icon
+  description String?
+  isDefault   Boolean         @default(false) // Là danh mục mặc định của hệ thống
+  isArchived  Boolean         @default(false)
+  sortOrder   Int             @default(0) // Thứ tự sắp xếp
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  // Relations
+  user                  User?                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent                Category?              @relation("CategoryTree", fields: [parentId], references: [id])
+  children              Category[]             @relation("CategoryTree")
+  transactions          Transaction[]
+  budgets               Budget[]
+  recurringTransactions RecurringTransaction[]
+
+  @@index([userId])
+  @@index([parentId])
+  @@map("categories")
+}
+
+// ============================================================
+// BẢNG THẺ (TAG)
+// ============================================================
+
+/// Thẻ/nhãn để phân loại giao dịch linh hoạt hơn
+model Tag {
+  id        Int   @id @default(autoincrement())
+  userId    Int
+  name      String
+  color     String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions TransactionTag[]
+
+  @@unique([userId, name])
+  @@map("tags")
+}
+
+// ============================================================
+// BẢNG GIAO DỊCH
+// ============================================================
+
+/// Bảng giao dịch chính (thu nhập, chi tiêu, chuyển khoản)
+model Transaction {
+  id              Int            @id @default(autoincrement())
+  userId          Int
+  fromAccountId   Int            // Tài khoản nguồn (chi tiêu / chuyển đi)
+  toAccountId     Int?           // Tài khoản đích (chuyển khoản nội bộ)
+  categoryId      Int?
+  type            TransactionType
+  status          TransactionStatus @default(COMPLETED)
+  amount          Decimal           @db.Decimal(15, 2)
+  currencyCode    String            @default("VND")
+  amountInVnd     Decimal?          @db.Decimal(15, 2) // Quy đổi về VND để thống kê
+  exchangeRate    Decimal?          @db.Decimal(20, 8) // Tỷ giá tại thời điểm giao dịch
+  transactionDate DateTime          // Ngày thực hiện giao dịch
+  description     String?           // Mô tả giao dịch
+  note            String?           // Ghi chú thêm
+  location        String?           // Địa điểm giao dịch
+  merchant        String?           // Tên nơi giao dịch (siêu thị, nhà hàng...)
+  referenceNo     String?           // Mã tham chiếu / mã giao dịch ngân hàng
+  isRecurring     Boolean           @default(false) // Có phải giao dịch định kỳ không
+  recurringId     Int?           // Liên kết với kế hoạch định kỳ
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  // Relations
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromAccount   Account               @relation("FromAccount", fields: [fromAccountId], references: [id])
+  toAccount     Account?              @relation("ToAccount", fields: [toAccountId], references: [id])
+  category      Category?             @relation(fields: [categoryId], references: [id])
+  recurringPlan RecurringTransaction? @relation(fields: [recurringId], references: [id])
+  tags          TransactionTag[]
+  attachments   Attachment[]
+  splitItems    TransactionSplit[]
+
+  @@index([userId])
+  @@index([fromAccountId])
+  @@index([categoryId])
+  @@index([transactionDate])
+  @@index([type])
+  @@map("transactions")
+}
+
+/// Bảng trung gian giao dịch - thẻ (many-to-many)
+model TransactionTag {
+  transactionId Int
+  tagId         Int
+
+  // Relations
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  tag           Tag         @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([transactionId, tagId])
+  @@map("transaction_tags")
+}
+
+/// Chia sẻ giao dịch (chia bill với nhiều người)
+model TransactionSplit {
+  id            Int      @id @default(autoincrement())
+  transactionId Int
+  personName    String      // Tên người chia
+  amount        Decimal     @db.Decimal(15, 2)
+  isPaid        Boolean     @default(false)
+  paidAt        DateTime?
+  note          String?
+  createdAt     DateTime    @default(now())
+
+  // Relations
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@map("transaction_splits")
+}
+
+// ============================================================
+// BẢNG GIAO DỊCH ĐỊNH KỲ
+// ============================================================
+
+/// Kế hoạch giao dịch định kỳ (lương, tiền điện, tiền nhà...)
+model RecurringTransaction {
+  id             Int              @id @default(autoincrement())
+  userId         Int
+  accountId      Int
+  categoryId     Int?
+  type           TransactionType
+  amount         Decimal             @db.Decimal(15, 2)
+  currencyCode   String              @default("VND")
+  description    String
+  note           String?
+  frequency      RecurrenceFrequency
+  dayOfMonth     Int?                // Ngày trong tháng (1-31) nếu MONTHLY
+  dayOfWeek      Int?                // Thứ trong tuần (0=CN,1=T2...) nếu WEEKLY
+  startDate      DateTime
+  endDate        DateTime?           // Null = không có ngày kết thúc
+  lastExecutedAt DateTime?           // Lần gần nhất thực hiện
+  nextExecuteAt  DateTime            // Lần tiếp theo thực hiện
+  isActive       Boolean             @default(true)
+  totalExecuted  Int                 @default(0) // Tổng số lần đã thực hiện
+  maxExecutions  Int?                // Số lần tối đa (null = không giới hạn)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  // Relations
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account       @relation(fields: [accountId], references: [id])
+  category     Category?     @relation(fields: [categoryId], references: [id])
+  transactions Transaction[]
+
+  @@index([userId])
+  @@index([nextExecuteAt])
+  @@map("recurring_transactions")
+}
+
+// ============================================================
+// BẢNG NGÂN SÁCH
+// ============================================================
+
+/// Ngân sách theo danh mục hoặc tổng thể
+model Budget {
+  id             Int     @id @default(autoincrement())
+  userId         Int
+  categoryId     Int?    // Null = ngân sách tổng thể
+  name           String
+  type           BudgetType
+  amount         Decimal    @db.Decimal(15, 2) // Hạn mức ngân sách
+  spentAmount    Decimal    @default(0) @db.Decimal(15, 2) // Đã chi
+  currencyCode   String     @default("VND")
+  startDate      DateTime
+  endDate        DateTime
+  alertThreshold Decimal    @default(80) @db.Decimal(5, 2) // % cảnh báo (ví dụ: 80%)
+  isActive       Boolean    @default(true)
+  rollover       Boolean    @default(false) // Có chuyển phần dư sang tháng sau không
+  note           String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  // Relations
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category?     @relation(fields: [categoryId], references: [id])
+  alerts   BudgetAlert[]
+
+  @@index([userId])
+  @@index([startDate, endDate])
+  @@map("budgets")
+}
+
+/// Lịch sử cảnh báo ngân sách
+model BudgetAlert {
+  id          Int   @id @default(autoincrement())
+  budgetId    Int
+  threshold   Decimal  @db.Decimal(5, 2) // % đã kích hoạt cảnh báo
+  triggeredAt DateTime @default(now())
+
+  // Relations
+  budget      Budget   @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+
+  @@index([budgetId])
+  @@map("budget_alerts")
+}
+
+// ============================================================
+// BẢNG MỤC TIÊU TIẾT KIỆM
+// ============================================================
+
+/// Mục tiêu tiết kiệm (mua xe, du lịch, quỹ khẩn cấp...)
+model SavingGoal {
+  id            Int     @id @default(autoincrement())
+  userId        Int
+  accountId     Int?    // Tài khoản tiết kiệm riêng cho mục tiêu này
+  name          String
+  targetAmount  Decimal    @db.Decimal(15, 2) // Số tiền cần đạt được
+  currentAmount Decimal    @default(0) @db.Decimal(15, 2) // Số tiền hiện có
+  currencyCode  String     @default("VND")
+  targetDate    DateTime?  // Hạn đạt mục tiêu
+  status        GoalStatus @default(IN_PROGRESS)
+  icon          String?
+  color         String?
+  description   String?
+  monthlyTarget Decimal?   @db.Decimal(15, 2) // Số tiền cần tiết kiệm mỗi tháng
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  // Relations
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account       Account?           @relation(fields: [accountId], references: [id])
+  contributions GoalContribution[]
+
+  @@index([userId])
+  @@map("saving_goals")
+}
+
+/// Lịch sử nạp tiền vào mục tiêu tiết kiệm
+model GoalContribution {
+  id        Int     @id @default(autoincrement())
+  goalId    Int
+  amount    Decimal    @db.Decimal(15, 2)
+  note      String?
+  date      DateTime   @default(now())
+  createdAt DateTime   @default(now())
+
+  // Relations
+  goal      SavingGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+
+  @@index([goalId])
+  @@map("goal_contributions")
+}
+
+// ============================================================
+// BẢNG NỢ / CHO VAY
+// ============================================================
+
+/// Quản lý nợ và khoản cho vay
+model Debt {
+  id              Int     @id @default(autoincrement())
+  userId          Int
+  accountId       Int?    // Tài khoản liên quan
+  type            DebtType
+  status          DebtStatus @default(ACTIVE)
+  personName      String     // Tên người liên quan
+  personContact   String?    // Số điện thoại / email người liên quan
+  amount          Decimal    @db.Decimal(15, 2) // Tổng số tiền gốc
+  remainingAmount Decimal    @db.Decimal(15, 2) // Số tiền còn lại
+  currencyCode    String     @default("VND")
+  interestRate    Decimal?   @db.Decimal(5, 2) // Lãi suất %/năm (nếu có)
+  dueDate         DateTime?  // Ngày đến hạn
+  description     String?
+  note            String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  // Relations
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account    Account?        @relation(fields: [accountId], references: [id])
+  repayments DebtRepayment[]
+
+  @@index([userId])
+  @@map("debts")
+}
+
+/// Lịch sử trả nợ / thu nợ
+model DebtRepayment {
+  id        Int   @id @default(autoincrement())
+  debtId    Int
+  amount    Decimal  @db.Decimal(15, 2)
+  date      DateTime @default(now())
+  note      String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  debt      Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+
+  @@index([debtId])
+  @@map("debt_repayments")
+}
+
+// ============================================================
+// BẢNG TỆP ĐÍNH KÈM
+// ============================================================
+
+/// Tệp đính kèm (hóa đơn, biên lai, ảnh chụp...)
+model Attachment {
+  id            Int       @id @default(autoincrement())
+  userId        Int
+  transactionId Int?
+  fileName      String       // Tên tệp gốc
+  fileUrl       String       // URL lưu trữ (S3, Cloudinary...)
+  fileType      String       // MIME type (image/jpeg, application/pdf...)
+  fileSize      Int          // Kích thước tệp (bytes)
+  description   String?
+  createdAt     DateTime     @default(now())
+
+  // Relations
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([transactionId])
+  @@map("attachments")
+}
+
+// ============================================================
+// BẢNG THÔNG BÁO
+// ============================================================
+
+/// Thông báo cho người dùng
+model Notification {
+  id        Int               @id @default(autoincrement())
+  userId    Int
+  type      NotificationType
+  priority  NotificationPriority @default(MEDIUM)
+  title     String
+  message   String
+  data      Json?                // Dữ liệu bổ sung (budgetId, goalId...)
+  isRead    Boolean              @default(false)
+  readAt    DateTime?
+  createdAt DateTime             @default(now())
+
+  // Relations
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ============================================================
+// BẢNG BÁO CÁO
+// ============================================================
+
+/// Báo cáo tài chính đã được tạo và lưu
+model Report {
+  id        Int     @id @default(autoincrement())
+  userId    Int
+  type      ReportType
+  title     String
+  startDate DateTime
+  endDate   DateTime
+  data      Json       // Dữ liệu báo cáo (charts, summaries...)
+  fileUrl   String?    // URL file báo cáo PDF/Excel (nếu xuất)
+  createdAt DateTime   @default(now())
+
+  // Relations
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("reports")
+}
+
+// ============================================================
+// BẢNG NHẬT KÝ HOẠT ĐỘNG (AUDIT LOG)
+// ============================================================
+
+/// Lịch sử thao tác quan trọng của người dùng (audit trail)
+model AuditLog {
+  id        Int   @id @default(autoincrement())
+  userId    Int
+  action    String   // CREATE, UPDATE, DELETE
+  entity    String   // Tên bảng/đối tượng (Transaction, Budget...)
+  entityId  String   // ID của đối tượng bị thay đổi
+  oldData   Json?    // Dữ liệu trước khi thay đổi
+  newData   Json?    // Dữ liệu sau khi thay đổi
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  // Relations
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
