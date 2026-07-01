@@ -48,6 +48,9 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./
 
+# Generate Prisma Client cho production
+RUN npx prisma generate
+
 # Chuyển sang user nestjs
 USER nestjs
 
