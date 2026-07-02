@@ -6,11 +6,6 @@ export class RegisterDto {
   @IsEmail({}, { message: 'Email không hợp lệ' })
   email!: string;
 
-  @ApiProperty({ example: 'username123', description: 'Tên đăng nhập duy nhất' })
-  @IsString()
-  @IsNotEmpty({ message: 'Tên đăng nhập không được để trống' })
-  username!: string;
-
   @ApiProperty({ example: 'Nguyễn Văn A', description: 'Họ tên đầy đủ' })
   @IsString()
   @IsNotEmpty({ message: 'Họ tên không được để trống' })

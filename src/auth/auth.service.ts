@@ -25,21 +25,12 @@ export class AuthService {
       throw new ConflictException('Email đã được sử dụng');
     }
 
-    const existingUsername = await this.prisma.user.findUnique({
-      where: { username: data.username },
-    });
-
-    if (existingUsername) {
-      throw new ConflictException('Tên đăng nhập đã được sử dụng');
-    }
-
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(data.password, saltRounds);
 
     const user = await this.prisma.user.create({
       data: {
         email: data.email,
-        username: data.username,
         fullName: data.fullName,
         passwordHash,
       },
@@ -49,8 +40,8 @@ export class AuthService {
     return result;
   }
 
-  private async generateTokens(userId: number, email: string, username: string) {
-    const payload = { sub: userId, email, username };
+  private async generateTokens(userId: number, email: string) {
+    const payload = { sub: userId, email };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
@@ -97,7 +88,7 @@ export class AuthService {
         console.error('Error updating lastLoginAt:', err);
       });
 
-    const tokens = await this.generateTokens(user.id, user.email, user.username);
+    const tokens = await this.generateTokens(user.id, user.email);
 
     // Save refresh token to user_sessions table
     const refreshExpiresInRaw = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
@@ -149,7 +140,7 @@ export class AuthService {
       }
 
       // 3. Generate new tokens (Refresh Token Rotation)
-      const tokens = await this.generateTokens(session.user.id, session.user.email, session.user.username);
+      const tokens = await this.generateTokens(session.user.id, session.user.email);
 
       const refreshExpiresInRaw = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
       let days = 7;
