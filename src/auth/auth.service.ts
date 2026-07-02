@@ -4,7 +4,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import * as bcrypt from 'bcrypt';
+import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -25,8 +25,7 @@ export class AuthService {
       throw new ConflictException('Email đã được sử dụng');
     }
 
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(data.password, saltRounds);
+    const passwordHash = await argon2.hash(data.password);
 
     const user = await this.prisma.user.create({
       data: {
@@ -46,8 +45,8 @@ export class AuthService {
     return result;
   }
 
-  private async generateTokens(userId: number, email: string) {
-    const payload = { sub: userId, email };
+  private async generateTokens(userId: number, email: string, fullName: string, avatarUrl: string | null) {
+    const payload = { sub: userId, email, fullName, avatarUrl };
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(payload, {
@@ -76,9 +75,9 @@ export class AuthService {
       throw new UnauthorizedException('Tài khoản đã bị khóa');
     }
 
-    const isPasswordValid = await bcrypt.compare(
-      data.password,
+    const isPasswordValid = await argon2.verify(
       user.passwordHash,
+      data.password,
     );
 
     if (!isPasswordValid) {
@@ -94,7 +93,7 @@ export class AuthService {
         console.error('Error updating lastLoginAt:', err);
       });
 
-    const tokens = await this.generateTokens(user.id, user.email);
+    const tokens = await this.generateTokens(user.id, user.email, user.fullName, user.avatarUrl);
 
     // Save refresh token to user_sessions table
     const refreshExpiresInRaw = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
@@ -146,7 +145,7 @@ export class AuthService {
       }
 
       // 3. Generate new tokens (Refresh Token Rotation)
-      const tokens = await this.generateTokens(session.user.id, session.user.email);
+      const tokens = await this.generateTokens(session.user.id, session.user.email, session.user.fullName, session.user.avatarUrl);
 
       const refreshExpiresInRaw = process.env.JWT_REFRESH_EXPIRES_IN || '7d';
       let days = 7;
