@@ -33,6 +33,12 @@ export class AuthService {
         email: data.email,
         fullName: data.fullName,
         passwordHash,
+        profile: {
+          create: {}, // Khởi tạo profile mặc định
+        },
+      },
+      include: {
+        profile: true,
       },
     });
 
